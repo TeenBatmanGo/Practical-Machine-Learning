@@ -1,0 +1,85 @@
+Manner Prediction
+=============================
+### Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement ¨C a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+### Data Processing
+#### Read Data
+```{r warning=FALSE}
+library(caret)
+library(randomForest)
+if(!file.exists("training.csv"))
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile="training.csv")
+if(!file.exists("testing.csv"))
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",destfile="testing.csv")
+
+training<-read.csv("training.csv")
+testing<-read.csv("testing.csv")
+```
+
+```{r}
+summary(training$classe)
+```
+
+#### Feature Selection
+There are `r ncol(training)` variables. That's a really large number so what we are going to do is to reduce the number using feature selection methods.
+```{r}
+# Remove zero covariates
+mattrix<-nearZeroVar(training,saveMetrics = TRUE)
+nzvtrain<-training[,-which(mattrix$nzv==TRUE)]
+
+# Remove NA variables
+propna<-apply(nzvtrain,2,function(x) mean(is.na(x)))
+completetrain<-nzvtrain[,-which(propna>0.5)]
+
+# Remove irrelevant variables
+newtrain<-completetrain[,-(1:6)]
+```
+The number of variables is now `r ncol(newtrain)`.
+
+#### Data Slicing
+In this step, we split the train data set into two parts, a pure training set and a validation set.
+```{r}
+set.seed(1234)
+inTrain<-createDataPartition(newtrain$classe,p=0.6,list=FALSE)
+traindata<-newtrain[inTrain,]
+testdata<-newtrain[-inTrain,]
+```
+
+### Model Fit
+We try to use random forest method to fit the model. The reason is that random forest can effectively prevent over-fitting and its prediction is quite accurate. Also it automaticly selects important variables, which can be very useful for further study. We will use 5-fold cross validation when applying this algorithm and set the number of trees to grow to 200.
+```{r warning=FALSE,cache=TRUE}
+rffit<-train(classe~.,data=traindata,method="rf",trControl=trainControl(method="cv",5),ntree=200)
+```
+
+```{r warning=FALSE,cache=TRUE}
+# Estimate on the validation set
+pre<-predict(rffit,testdata)
+mat<-confusionMatrix(testdata$classe,pre)
+mat
+accuracy<-mat$overall[1]
+accuracy
+```
+Above is a cross-tabulation of observed and predicted classes with associated statistics. We can see that the out-of-sample error is `r paste(round((1-as.numeric(accuracy))*100,2),"%",sep="")`.
+
+Below is the final model plot.
+```{r}
+plot(1:200,rffit$finalModel$err.rate[,2],lwd=2,type="l",main="Model Fit",xlab="trees",ylab="Error Rate")
+for(i in 3:6)
+        lines(1:200,rffit$finalModel$err.rate[,i],lwd=2,type="l",col=i-1)
+len<-length(traindata$classe)
+legend("topright",legend=levels(traindata$classe),col=1:len,title="classe",cex=1.2,lwd=2)
+```
+
+This plot shows that as the number of trees grow larger for all five classe the error rates are all under 0.04.
+
+### Prediction
+Finally, we can use the above model to predict based on the test data set.
+```{r warning=FALSE}
+name<-vector()
+for(i in 1:length(names(newtrain))) 
+        name<-c(name,which(names(training)==names(newtrain)[i]))
+newtest<-testing[,name][,-length(name)]
+predict(rffit,newtest)
+```
+
